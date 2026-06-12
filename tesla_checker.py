@@ -35,130 +35,56 @@ POSTAL_CODES = [
     "P3E 3E6",  # Sudbury
 ]
 
-NTFY_TOPIC = "tesla-model3-premium-alert-himani"
-SEEN_FILE = "seen_vins.json"
+
+
+NTFY_TOPIC = "tesla-model3-premium-alert-himani"  # you can change this
 
 
 def notify(message):
     requests.post(
         f"https://ntfy.sh/{NTFY_TOPIC}",
         data=message.encode("utf-8"),
-        headers={"Title": "Tesla Inventory Alert"},
-        timeout=20,
+        headers={"Title": "Tesla Inventory Alert"}
     )
 
 
-def load_seen_vins():
-    if not os.path.exists(SEEN_FILE):
-        return set()
-
-    with open(SEEN_FILE, "r") as f:
-        return set(json.load(f))
-
-
-def save_seen_vins(seen_vins):
-    with open(SEEN_FILE, "w") as f:
-        json.dump(sorted(list(seen_vins)), f, indent=2)
-
-
-def tesla_inventory_url(postal_code):
-    query = {
-        "query": {
-            "model": "m3",
-            "condition": "new",
-            "arrangeby": "Price",
-            "order": "asc",
-            "market": "CA",
-            "language": "en",
-            "super_region": "north america",
-            "zip": postal_code,
-            "range": 200,
-        },
-        "offset": 0,
-        "count": 50,
-        "outsideOffset": 0,
-        "outsideSearch": False,
-    }
-
-    encoded_query = urllib.parse.quote(json.dumps(query))
-    return f"https://www.tesla.com/inventory/api/v1/inventory-results?query={encoded_query}"
-
-
-def normal_tesla_link(postal_code):
-    return (
+def check_postal_code(postal_code):
+    tesla_url = (
         "https://www.tesla.com/en_CA/inventory/new/m3"
         f"?arrangeby=relevance&zip={urllib.parse.quote(postal_code)}&range=200"
     )
 
-
-def get_inventory(postal_code):
-    url = tesla_inventory_url(postal_code)
+    print(f"Checking: {postal_code}")
+    print(tesla_url)
 
     headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0"
     }
 
-    response = requests.get(url, headers=headers, timeout=30)
-    response.raise_for_status()
+    response = requests.get(tesla_url, headers=headers, timeout=30)
 
-    data = response.json()
-    return data.get("results", [])
+    page_text = response.text.lower()
 
-
-def format_vehicle(vehicle, postal_code):
-    vin = vehicle.get("VIN", "N/A")
-    price = vehicle.get("Price", "N/A")
-    odometer = vehicle.get("Odometer", "N/A")
-    trim = vehicle.get("TrimName", vehicle.get("TrimCode", "Model 3"))
-    city = vehicle.get("City", "N/A")
-    state = vehicle.get("StateProvince", "N/A")
-    exterior = vehicle.get("PAINT", vehicle.get("ExteriorColor", "N/A"))
-
-    return f"""
-🚗 New Tesla Model 3 inventory found
+    # Simple page-based check
+    if "model 3" in page_text and ("premium" in page_text or "inventory" in page_text):
+        message = f"""
+🚗 Possible New Model 3 Premium inventory found
 
 Search postal code: {postal_code}
-Vehicle location: {city}, {state}
-Trim: {trim}
-Price: ${price}
-Odometer: {odometer}
-Exterior: {exterior}
-VIN: {vin}
+Tesla link:
+{tesla_url}
 
-Open Tesla inventory:
-{normal_tesla_link(postal_code)}
+Please open the link and verify availability.
 """
+        notify(message)
+        print("Inventory alert sent.")
+    else:
+        print("No matching inventory found.")
 
 
 def main():
-    seen_vins = load_seen_vins()
-    current_vins = set(seen_vins)
-
     for postal_code in POSTAL_CODES:
-        print(f"Checking {postal_code}...")
-
-        try:
-            vehicles = get_inventory(postal_code)
-        except Exception as e:
-            print(f"Error checking {postal_code}: {e}")
-            continue
-
-        print(f"Found {len(vehicles)} vehicle(s) near {postal_code}")
-
-        for vehicle in vehicles:
-            vin = vehicle.get("VIN")
-
-            if not vin:
-                continue
-
-            if vin not in seen_vins:
-                message = format_vehicle(vehicle, postal_code)
-                notify(message)
-                print(f"Alert sent for VIN {vin}")
-                current_vins.add(vin)
-
-    save_seen_vins(current_vins)
+        check_postal_code(postal_code)
 
 
 if __name__ == "__main__":
